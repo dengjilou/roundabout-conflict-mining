@@ -6,7 +6,7 @@
 
 ![合成环岛交互演示预览](docs/preview.png)
 
-[交互演示 HTML](docs/index.html) · [实测报告](review.md#降速证据与最终对照)
+[在线交互演示](https://dengjilou.github.io/roundabout-conflict-mining/) · [实测报告](review.md#降速证据与最终对照) · [离线演示 HTML](docs/index.html)
 
 下载 HTML，用浏览器打开即可。合成演示用原创底图和程序生成的轨迹展示三种情况：同路短间隔、不同来向短间隔、超过 2 秒但出现明显降速的汇入。选中 **#3**，点击「跳到降速区间」或直接点击速度图，地图会跳到同一时刻。
 

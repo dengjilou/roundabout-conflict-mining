@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>真实环岛交通冲突回放</title>
+<style>
+:root{color-scheme:dark;--bg:#111719;--card:#1a2326;--edge:#354346;--text:#f0f5f3;--muted:#b0c1be;--mint:#7ef0cb;--amber:#ffc66d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 "Inter","Microsoft YaHei",sans-serif}
+main{max-width:1500px;margin:auto;padding:28px 4vw 42px}header{border-bottom:1px solid var(--edge);margin-bottom:20px;padding-bottom:16px}
+h1{font-size:clamp(24px,3.4vw,36px);line-height:1.13;margin:0 0 8px}h2{font-size:17px;margin:0 0 10px}
+p{margin:0 0 12px;color:var(--muted)}.layout{display:grid;grid-template-columns:minmax(0,2.2fr) minmax(300px,1fr);gap:16px}
+article,aside{background:var(--card);border:1px solid var(--edge);border-radius:12px;overflow:hidden}
+article .body,aside{padding:16px}canvas{display:block;width:100%;background:#0c1012}button,select{background:#263436;color:var(--text);font:inherit;border:1px solid #526461;border-radius:7px;padding:6px 10px}
+button{cursor:pointer}button[aria-pressed=true]{border-color:var(--mint);color:var(--mint);background:#173831}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.time{margin-left:auto;font:14px ui-monospace,monospace}
+input[type=range]{width:100%;accent-color:var(--mint);margin:13px 0}select{width:100%;margin:0 0 10px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 15px;color:var(--muted);font-size:13px}.mint{color:var(--mint)}.amber{color:var(--amber)}
+dl{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 14px}
+dl div{background:#121b1d;border:1px solid var(--edge);border-radius:8px;padding:8px 10px}dt{color:var(--muted);font-size:12px}dd{margin:0;font:22px/1.4 ui-monospace,monospace}
+#events{display:grid;gap:5px;max-height:275px;overflow:auto;align-content:start}#events button{text-align:left;display:flex;justify-content:space-between;gap:10px;font-size:13px}
+#details{margin:0 0 12px;font-size:13px;min-height:46px}#approachInfo{font-size:13px;margin-bottom:12px}footer{font-size:12px;color:var(--muted);margin-top:14px}a{color:#a1e6d2}
+@media(max-width:880px){.layout{grid-template-columns:1fr}}
+#speedPanel{border-top:1px solid var(--edge);margin-top:12px;padding-top:11px}
+#speedPanel h2{font-size:15px;margin-bottom:5px}
+#speedChart{border-radius:6px;height:auto;aspect-ratio:680/210;cursor:crosshair}
+#speedDetails{font-size:12px;margin-top:7px;margin-bottom:2px}
+#speedJump{margin-top:6px;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<header><h1>真实环岛交通冲突回放</h1><p id="recording"></p></header>
+<div class="layout">
+<article aria-label="车辆轨迹回放">
+<canvas id="map" width="1280" height="720" role="img" aria-label="环岛俯视图及车辆检测框"></canvas>
+<div class="body">
+<div class="toolbar">
+<button id="play" type="button">播放</button>
+<button id="prev" type="button" aria-label="上一显示帧">◀ 单步</button>
+<button id="next" type="button" aria-label="下一显示帧">单步 ▶</button>
+<button id="approachStart" type="button" hidden>查看上游来向</button>
+<button id="change" type="button">跳到第二辆车进入</button>
+<span class="time" id="time"></span>
+</div>
+<input id="timeline" type="range" min="0" value="0" aria-label="记录时间轴">
+<div class="legend"><span class="mint">■ 先进入的车辆</span><span class="amber">■ 后进入的车辆</span><span>◯ 汇合区</span><span id="gateLegend" hidden><span style="color:#bca5ff">━ 北侧入口</span> · <span style="color:#72dfff">━ 环道</span></span></div>
+</div>
+</article>
+<aside>
+<h2>待复核的通行片段</h2>
+<dl><div><dt>候选配对</dt><dd id="count"></dd></div><div><dt id="resultLabel">两法均检出</dt><dd id="both"></dd></div></dl>
+<label for="filter">按筛选结果查看</label>
+<select id="filter">
+<option value="all">全部配对</option><option value="both">两法均检出</option>
+<option value="distance">仅最近距离命中</option><option value="pet">仅通过时间差命中</option>
+<option value="neither">两法均未命中</option>
+<optgroup id="approachFilters" label="按车辆来向筛选">
+<option value="merging_time">不同来向且时间差 ≤ 2 s</option>
+<option value="entry_and_circulating">不同来向汇合</option>
+<option value="same_approach">同路顺次通行</option>
+<option value="merge_review">不同来向且命中时间差或降速规则</option>
+<option value="unknown">来向待确认</option>
+</optgroup>
+</select>
+<p id="details" aria-live="polite"></p>
+<p id="approachInfo" aria-live="polite" hidden></p>
+<div id="events"></div>
+<section id="speedPanel" hidden>
+<h2>两车速度变化</h2>
+<canvas id="speedChart" width="680" height="210" role="img" aria-label="两辆车速度随时间的曲线"></canvas>
+<p id="speedDetails" aria-live="polite"></p>
+<button id="speedJump" type="button">跳到降速区间</button>
+</section>
+</aside>
+</div>
+<footer id="source">OpenDD 真实轨迹与地图 · 候选片段用于复核 · <a href="https://l3pilot.eu/data/opendd.html">数据来源与许可</a></footer>
+</main>
+<script type="application/json" id="data">__REPLAY_DATA__</script>
+<script>
+"use strict";
+const {summary,events,frames,affine} = JSON.parse(document.getElementById("data").textContent);
+const byId = (id) => document.getElementById(id);
+const canvas = byId("map");
+const ctx = canvas.getContext("2d");
+const backdrop = new Image();
+const [dx,ry,rx,dy,ox,oy] = affine;
+const determinant = dx * dy - ry * rx;
+const timeline = byId("timeline");
+const filter = byId("filter");
+const labels = {both:"双命中",distance:"距离",pet:"时间差",neither:"均未命中"};
+const colors = ["#7ef0cb","#ffc66d"];
+const gates = summary.zone.approach?.gates;
+const synthetic = summary.recording === "synthetic";
+if (synthetic) {
+  document.title = "环岛场景挖掘 · 合成演示";
+  document.querySelector("h1").textContent = document.title;
+  byId("source").textContent = "原创示意底图与合成轨迹 · 实测结果见项目 README";
+}
+const speedChart = byId("speedChart");
+const speedContext = speedChart.getContext("2d");
+let speedBounds = null;
+const gateNames = {north_entry:"北侧入口",circulating:"环道"};
+const gateColors = {north_entry:"#bca5ff",circulating:"#72dfff"};
+const pathNames = {entry_and_circulating:"不同来向",same_approach:"同路",unknown:"来向待确认"};
+let selected = events.find(event => event.merge_review_hit && !event.merging_time_hit)
+  || events.find(event => event.merging_time_hit) || events.filter(event => event.pet_hit).sort((a,b) => a.pet_s - b.pet_s)[0] || events[0];
+let frameIndex = 0;
+let animation = null;
+
+function mapPoint(x,y) {
+  return [
+    (dy * (x-ox) - rx * (y-oy)) / determinant * canvas.width / backdrop.width,
+    (dx * (y-oy) - ry * (x-ox)) / determinant * canvas.height / backdrop.height,
+  ];
+}
+
+function line(points, color, width, closed = false) {
+  ctx.beginPath();
+  points.forEach(([x,y],i) => i ? ctx.lineTo(x,y) : ctx.moveTo(x,y));
+  if (closed) ctx.closePath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = width;
+  ctx.stroke();
+}
+
+function seek(time) {
+  let left = 0, right = frames.length - 1;
+  while (left < right) {
+    const middle = (left + right) >> 1;
+    if (frames[middle][0] < time) left = middle + 1;
+    else right = middle;
+  }
+  setFrame(left > 0 && time - frames[left-1][0] < frames[left][0] - time ? left-1 : left);
+}
+
+function drawVehicle(point, highlight) {
+  const [id,x,y,heading,length,width] = point;
+  const cos = Math.cos(heading), sin = Math.sin(heading);
+  const outline = [[1,1],[1,-1],[-1,-1],[-1,1]].map(([a,b]) =>
+    mapPoint(x + a*length/2*cos - b*width/2*sin, y + a*length/2*sin + b*width/2*cos));
+  const color = highlight >= 0 ? colors[highlight] : "#d1dedc9c";
+  line(outline,color,highlight >= 0 ? 3 : 1.25,true);
+  if (highlight >= 0) {
+    ctx.fillStyle = color;
+    ctx.font = "bold 21px monospace";
+    const [px,py] = mapPoint(x,y);
+    ctx.strokeStyle = "#111719";
+    ctx.lineWidth = 5;
+    ctx.strokeText(String(id),px+13,py-10);
+    ctx.fillText(String(id),px+13,py-10);
+  }
+}
+
+function setFrame(index) {
+  frameIndex = Math.min(frames.length-1,Math.max(0,index));
+  timeline.value = frameIndex;
+  const [time,points] = frames[frameIndex];
+  byId("time").textContent = time.toFixed(2) + " s";
+  drawSpeed(time);
+  if (!backdrop.complete || !backdrop.naturalWidth) return;
+  ctx.drawImage(backdrop,0,0,canvas.width,canvas.height);
+  ctx.fillStyle = "#10191c44";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  const {x,y,radius} = summary.zone;
+  line(Array.from({length:48},(_,i) => {
+    const angle = i * Math.PI / 24;
+    return mapPoint(x + radius*Math.cos(angle), y + radius*Math.sin(angle));
+  }),"#fff4bc",2.5,true);
+  for (const [name, segment] of Object.entries(gates || {})) {
+    line(segment.map(point => mapPoint(...point)),gateColors[name],4);
+  }
+  const ids = selected ? [selected.first,selected.second] : [];
+  ids.forEach((id,index) => {
+    const path = [];
+    const trail = gates ? 160 : 20;
+    for (let i=Math.max(frameIndex-trail,0); i<=frameIndex; i++) {
+      const point = frames[i][1].find(p => p[0] === id);
+      if (point) path.push(mapPoint(point[1],point[2]));
+      else if (path.length) path.length = 0;
+    }
+    if (path.length > 1) line(path,colors[index],2.5);
+  });
+  points.filter(point => !ids.includes(point[0])).forEach(point => drawVehicle(point,-1));
+  points.filter(point => ids.includes(point[0])).forEach(point => drawVehicle(point,ids.indexOf(point[0])));
+}
+
+function showEvents() {
+  const list = byId("events");
+  list.replaceChildren();
+  const visible = events.filter(event => filter.value === "all" || filter.value === event.status
+    || filter.value === event.path_label || (filter.value === "merging_time" && event.merging_time_hit)
+    || (filter.value === "merge_review" && event.merge_review_hit));
+  [...visible].sort((a,b) => (a.pet_s ?? Infinity) - (b.pet_s ?? Infinity) || a.id-b.id).forEach(event => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("aria-pressed",String(event === selected));
+    const pair = document.createElement("span");
+    pair.textContent = "#" + event.id + " · " + event.first + " → " + event.second;
+    const tag = document.createElement("span");
+    tag.textContent = gates ? pathNames[event.path_label] : labels[event.status];
+    if (event.merge_review_hit && !event.merging_time_hit) tag.textContent = "降速补充";
+    button.append(pair,tag);
+    button.onclick = () => {
+      pause();
+      selected = event;
+      updateDetails();
+      for (const item of list.children) item.setAttribute("aria-pressed",String(item === button));
+      seek(startTime(event));
+    };
+    list.appendChild(button);
+  });
+  if (!visible.length) list.textContent = "这一筛选条件下没有候选片段。";
+}
+
+function strongestDrop(event) {
+  return [event.first_speed_drop,event.second_speed_drop].filter(Boolean)
+    .sort((a,b) => b.drop_mps-a.drop_mps)[0];
+}
+
+function updateSpeed(event) {
+  const values = Object.values(event.speed_series || {}).flat();
+  byId("speedPanel").hidden = !values.length;
+  if (!values.length) {
+    speedBounds = null;
+    return;
+  }
+  speedBounds = {
+    start: event.speed_chart_start_s, end: event.speed_chart_end_s,
+    top: Math.max(2, Math.ceil(Math.max(...values.map(point => point[1])) / 2) * 2),
+    drop: strongestDrop(event),
+  };
+  const format = (value) => value === null ? "观测不足" : value.toFixed(2) + " m/s";
+  byId("speedDetails").textContent = "1 秒最大降速 · " + event.first + " "
+    + format(event.first_drop_mps) + " ｜ " + event.second + " " + format(event.second_drop_mps);
+  byId("speedJump").disabled = !speedBounds.drop || speedBounds.drop.drop_mps === 0;
+}
+
+function drawSpeed(time) {
+  if (!speedBounds) return;
+  const {start,end,top,drop} = speedBounds;
+  const plotLeft = 59, plotRight = 660, plotTop = 17, plotBottom = 165;
+  const px = (t) => plotLeft + (t-start)/(end-start)*(plotRight-plotLeft);
+  const py = (speed) => plotBottom - speed/top*(plotBottom-plotTop);
+  const c = speedContext;
+  c.fillStyle = "#11191c";
+  c.fillRect(0,0,speedChart.width,speedChart.height);
+  if (drop && drop.drop_mps >= summary.rules.speed.review_drop_mps) {
+    c.fillStyle = "#ffc66d36";
+    c.fillRect(px(drop.start_s),plotTop,px(drop.end_s)-px(drop.start_s),plotBottom-plotTop);
+  }
+  c.font = "18px system-ui";
+  [0,top/2,top].forEach(value => {
+    c.fillStyle = "#81979d";
+    c.fillText(value.toFixed(0),20,py(value)+6);
+    c.fillRect(plotLeft,py(value),plotRight-plotLeft,1);
+  });
+  c.fillStyle = "#b0c1be";
+  c.fillText("m/s",9,201);
+  c.fillText(start.toFixed(1)+" s",plotLeft,201);
+  c.textAlign = "right";
+  c.fillText(end.toFixed(1)+" s",plotRight,201);
+  c.textAlign = "left";
+  ["first","second"].forEach((key,index) => {
+    const entry = selected[key + "_enter"];
+    c.fillStyle = colors[index] + "55";
+    c.fillRect(px(entry),plotTop,2,plotBottom-plotTop);
+    c.strokeStyle = colors[index];
+    c.lineWidth = 3;
+    c.beginPath();
+    let last = -Infinity;
+    for (const [t,value] of selected.speed_series[key]) {
+      if (t-last > summary.rules.max_frame_gap_s) c.moveTo(px(t),py(value));
+      else c.lineTo(px(t),py(value));
+      last = t;
+    }
+    c.stroke();
+  });
+  if (time >= start && time <= end) {
+    c.fillStyle = "#f0f5f3";
+    c.fillRect(px(time),plotTop,2,plotBottom-plotTop);
+  }
+}
+
+speedChart.onclick = (event) => {
+  if (!speedBounds) return;
+  const rect = speedChart.getBoundingClientRect();
+  const x = (event.clientX-rect.left)*speedChart.width/rect.width;
+  const fraction = Math.max(0,Math.min(1,(x-59)/(660-59)));
+  pause();
+  seek(speedBounds.start + fraction*(speedBounds.end-speedBounds.start));
+};
+byId("speedJump").onclick = () => {pause();seek(speedBounds.drop.start_s);};
+
+function startTime(event) {
+  const gateTimes = [event.first_gate_s,event.second_gate_s].filter(time => Number.isFinite(time));
+  return Math.max(frames[0][0], gateTimes.length ? Math.min(...gateTimes)-1 : event.first_leave-1);
+}
+
+function updateDetails() {
+  const event = selected;
+  if (!event) {
+    byId("details").textContent = "本次记录没有符合配对条件的完整通行。";
+    byId("change").disabled = true;
+    byId("approachStart").disabled = true;
+    return;
+  }
+  updateSpeed(event);
+  const gap = event.pet_s === null ? "占用重叠 " + event.overlap_s.toFixed(2) + " s" : "通过时间差 " + event.pet_s.toFixed(2) + " s";
+  const distance = event.distance_m === null ? "没有共同观测帧" : "最近中心距 " + event.distance_m.toFixed(2) + " m";
+  byId("details").textContent = event.first + " → " + event.second + " · " + gap + " · " + distance
+    + "。第一辆车离开 " + event.first_leave.toFixed(2) + " s，第二辆车进入 " + event.second_enter.toFixed(2) + " s。";
+  if (gates) {
+    const evidence = [["first",event.first],["second",event.second]].map(([key,id]) => {
+      const gate = event[key + "_approach"];
+      const time = event[key + "_gate_s"];
+      return gate ? id + " · " + gateNames[gate] + " " + time.toFixed(2) + " s" : id + " · 来向待确认";
+    });
+    byId("approachInfo").textContent = pathNames[event.path_label] + " ｜ " + evidence.join("；");
+    byId("approachStart").disabled = event.first_gate_s === null && event.second_gate_s === null;
+  }
+}
+
+function pause() {
+  clearInterval(animation);
+  animation = null;
+  byId("play").textContent = "播放";
+}
+
+byId("recording").textContent = (synthetic ? "三组示例" : summary.recording) + " · " + summary.zone.name + " · "
+  + summary.duration_s.toFixed(1) + " 秒 · " + summary.objects + " 个道路参与者";
+byId("count").textContent = summary.pairs;
+byId("gateLegend").hidden = !gates;
+byId("approachInfo").hidden = !gates;
+byId("approachStart").hidden = !gates;
+byId("approachFilters").hidden = !gates;
+if (gates) byId("resultLabel").textContent = "不同来向且 ≤ 2 s";
+byId("both").textContent = gates ? summary.merging_time_hits : summary.screen_counts.both;
+byId("approachStart").onclick = () => {pause();seek(startTime(selected));};
+timeline.max = frames.length-1;
+timeline.oninput = () => setFrame(Number(timeline.value));
+byId("prev").onclick = () => {pause();setFrame(frameIndex-1);};
+byId("next").onclick = () => {pause();setFrame(frameIndex+1);};
+byId("change").onclick = () => {pause();seek(selected.second_enter);};
+byId("play").onclick = () => {
+  if (animation !== null) {pause();return;}
+  const origin = performance.now() - frames[frameIndex][0]*1000;
+  byId("play").textContent = "暂停";
+  animation = setInterval(() => {
+    seek((performance.now()-origin)/1000);
+    if (frameIndex === frames.length-1) pause();
+  },50);
+};
+filter.onchange = showEvents;
+showEvents();
+updateDetails();
+backdrop.onload = () => selected ? seek(startTime(selected)) : setFrame(0);
+backdrop.src = "__BACKDROP__";
+</script>
+</body>
+</html>

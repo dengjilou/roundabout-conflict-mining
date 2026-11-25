@@ -1,0 +1,53 @@
+{
+  "rules": {
+    "max_gap_s": 5,
+    "pet_s": 2,
+    "max_distance_m": 5,
+    "visit_margin_s": 1,
+    "max_frame_gap_s": 0.12,
+    "speed": {
+      "pre_gate_s": 3.0,
+      "drop_window_s": 1.0,
+      "review_drop_mps": 1.0
+    }
+  },
+  "sites": {
+    "rdb1": {
+      "name": "东侧入口汇合区",
+      "x": 619317.537,
+      "y": 5809158.164,
+      "radius": 2.5
+    },
+    "rdb5": {
+      "name": "西北侧入口汇合区",
+      "x": 617375.341,
+      "y": 5806803.585,
+      "radius": 2.5,
+      "approach": {
+        "lookback_s": 15,
+        "gates": {
+          "north_entry": [
+            [
+              617398.828,
+              5806807.507
+            ],
+            [
+              617402.181,
+              5806804.226
+            ]
+          ],
+          "circulating": [
+            [
+              617398.919,
+              5806798.768
+            ],
+            [
+              617395.266,
+              5806795.083
+            ]
+          ]
+        }
+      }
+    }
+  }
+}

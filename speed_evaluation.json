@@ -1,0 +1,34 @@
+{
+  "earlier_rdb5_343_362": {
+    "recordings": 20,
+    "duration_min": 143.3,
+    "pairs": 14,
+    "same_approach": 9,
+    "entry_and_circulating": 5,
+    "unknown": 0,
+    "time_hits": 5,
+    "merge_time_hits": 1,
+    "merge_review_hits": 1,
+    "speed_hits": 3,
+    "same_approach_speed_hits": 2,
+    "speed_only_merge_events": {}
+  },
+  "heldout_rdb5_363_392": {
+    "recordings": 30,
+    "duration_min": 204.72,
+    "pairs": 88,
+    "same_approach": 62,
+    "entry_and_circulating": 26,
+    "unknown": 0,
+    "time_hits": 34,
+    "merge_time_hits": 6,
+    "merge_review_hits": 7,
+    "speed_hits": 11,
+    "same_approach_speed_hits": 8,
+    "speed_only_merge_events": {
+      "rdb5_377": [
+        6
+      ]
+    }
+  }
+}
